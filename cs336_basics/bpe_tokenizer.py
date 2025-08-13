@@ -113,7 +113,7 @@ def train_bpe(
         #  d. update pair_to_words to use new word representation
         # 3. clean-up everything related to the pair
         ####
-        
+        # print(f"iteration {i}: {len(pair_frequency)}")
         # step 1
         # find most common pair
         sorted_pairs = sorted(
@@ -129,21 +129,21 @@ def train_bpe(
         
         # step 2
         # update representation and stats for all words containing this_merge pair
-        target_words = sorted(pair_to_words[this_merge])
+        target_words = pair_to_words[this_merge]
         # next for loop can be parallelized
-        results = []
-        for word in target_words:
-            results.append(process_word_with_merge(
-                 word, new_token, word_tokens, word_count
-             ))
-        # func = partial(
-        #     process_word_with_merge,
-        #     new_token=new_token, 
-        #     word_to_tokens=word_tokens,
-        #     word_count=word_count
-        # )
-        # with Pool(processes=10) as p:
-        #     results = p.map(func, target_words)
+        # results = []
+        # for word in target_words:
+        #     results.append(process_word_with_merge(
+        #          word, new_token, word_tokens, word_count
+        #      ))
+        func = partial(
+            process_word_with_merge,
+            new_token=new_token, 
+            word_to_tokens=word_tokens,
+            word_count=word_count
+        )
+        with Pool(processes=os.cpu_count()) as p:
+            results = p.map(func, target_words)
         
         # reduce results globally
         for res in results:
@@ -167,6 +167,10 @@ def train_bpe(
         # forget this token as a pair
         del pair_to_words[this_merge]
         del pair_frequency[this_merge]
+        current_pairs = list(pair_frequency.keys())
+        for p in current_pairs:
+            if pair_frequency[p] == 0:
+                del pair_frequency[p]
 
     # add special tokens to vocab
     for i, token in enumerate(special_tokens):

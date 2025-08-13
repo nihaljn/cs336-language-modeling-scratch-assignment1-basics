@@ -66,7 +66,7 @@ def process_chunk(boundary: tuple[str, str], path=None, special_tokens=None) -> 
         doc = f.read(end - start).decode("utf-8", errors="ignore")
     # Run pre-tokenization on your chunk and store the counts 
     # for each pre-tokens
-    chunk_strs = re.split("|".join(special_tokens), doc)
+    chunk_strs = re.split("|".join(map(re.escape, special_tokens)), doc)
     c = Counter()
     for chunk_str in chunk_strs:
         pre_tokens = re.findall(PAT, chunk_str)
