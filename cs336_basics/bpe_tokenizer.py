@@ -1,7 +1,4 @@
-import os
 from collections import Counter, defaultdict
-from functools import partial
-from multiprocessing import Pool
 
 from cs336_basics.pretokenization_example import pre_tokenize
 from tqdm import tqdm
@@ -26,32 +23,6 @@ def get_new_word_representation(
             # old token used for word
             new_word_representation.append(word_representation[i]) 
     return tuple(new_word_representation)
-
-
-def process_word_with_merge(
-    word: str, 
-    new_token: bytes, 
-    word_to_tokens: dict[str, tuple[bytes]],
-    word_count: dict[str, int]
-) -> tuple:
-    old_word_representation = word_to_tokens[word]
-    new_word_representation = get_new_word_representation(
-        old_word_representation, new_token
-    )
-    # print(f"Before: {old_word_representation}\nAfter: {new_word_representation}\nReplacing: {other_pairs_to_replace}\n\n")
-
-    # new word representation brings new pairs
-    # 1. update pair_frequency
-    # 2. update pair_to_words
-    this_word_count = word_count[word]
-    this_pair_frequency = Counter()
-    for (b1, b2) in zip(new_word_representation[:-1], new_word_representation[1:]):
-        this_pair_frequency[(b1, b2)] += this_word_count
-    for (b1, b2) in zip(old_word_representation[:-1], old_word_representation[1:]):
-        this_pair_frequency[(b1, b2)] -= this_word_count
-
-    # send everything needed to apply update at global level
-    return (word, new_word_representation, this_pair_frequency)
 
 
 def train_bpe(
@@ -113,8 +84,6 @@ def train_bpe(
         #  d. update pair_to_words to use new word representation
         # 3. clean-up everything related to the pair
         ####
-        # print(f"iteration {i}: {len(pair_frequency)}")
-        # step 1
         # find most common pair
         sorted_pairs = sorted(
             pair_frequency.items(),
@@ -129,48 +98,35 @@ def train_bpe(
         
         # step 2
         # update representation and stats for all words containing this_merge pair
-        target_words = pair_to_words[this_merge]
-        # next for loop can be parallelized
-        # results = []
-        # for word in target_words:
-        #     results.append(process_word_with_merge(
-        #          word, new_token, word_tokens, word_count
-        #      ))
-        func = partial(
-            process_word_with_merge,
-            new_token=new_token, 
-            word_to_tokens=word_tokens,
-            word_count=word_count
-        )
-        with Pool(processes=os.cpu_count()) as p:
-            results = p.map(func, target_words)
-        
-        # reduce results globally
-        for res in results:
-            (word, new_word_representation, 
-             this_pair_frequency) = res
+        target_words = list(pair_to_words[this_merge])
+        for word in target_words:
+            this_word_count = word_count[word]
             old_word_representation = word_tokens[word]
-            # perform updates
+            new_word_representation = get_new_word_representation(
+                old_word_representation, new_token
+            )
             word_tokens[word] = new_word_representation
-            pair_frequency.update(this_pair_frequency)
-            for (b1, b2) in zip(old_word_representation[:-1], old_word_representation[1:]):
-                if word in pair_to_words[(b1, b2)]:
+            # new word representation brings new pairs
+            # 1. update pair_frequency
+            # 2. update pair_to_words
+            for j in range(len(old_word_representation) - 1):
+                p = (old_word_representation[j], old_word_representation[j+1])
+                pair_frequency[p] -= this_word_count
+                word_set = pair_to_words[p]
+                if word in word_set:
                     # need to check above because (b1, b2) may have been 
                     # removed in this iteration itself
                     # e.g., 't','e','s','t','e','d' and we remove 't','e'
                     # so it gets removed once already
-                    pair_to_words[(b1, b2)].remove(word)
-            for (b1, b2) in zip(new_word_representation[:-1], new_word_representation[1:]):
+                    word_set.remove(word)
+                    if len(word_set) == 0:
+                        del pair_to_words[p]
+                if pair_frequency[p] == 0:
+                    del pair_frequency[p]
+            for i in range(len(new_word_representation) - 1):
+                (b1, b2) = new_word_representation[i], new_word_representation[i+1]
+                pair_frequency[(b1, b2)] += this_word_count
                 pair_to_words[(b1, b2)].add(word)
-
-        # step 3
-        # forget this token as a pair
-        del pair_to_words[this_merge]
-        del pair_frequency[this_merge]
-        current_pairs = list(pair_frequency.keys())
-        for p in current_pairs:
-            if pair_frequency[p] == 0:
-                del pair_frequency[p]
 
     # add special tokens to vocab
     for i, token in enumerate(special_tokens):
@@ -181,7 +137,16 @@ def train_bpe(
 
 if __name__ == "__main__":
     import sys
+    import pprint
+    import os
     vocab, merges = train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
     print("Vocab size:", len(vocab))
     print("Merges:", len(merges))
-    import ipdb; ipdb.set_trace()
+    out_dir = sys.argv[3]
+    if not os.path.exists(out_dir):
+        print("Creating output directory", out_dir)
+        os.makedirs(out_dir)
+    with open(os.path.join(out_dir, "merges.txt"), "w") as f:
+        print(pprint.pformat(merges), file=f)
+    with open(os.path.join(out_dir, "vocab.txt"), "w") as f:
+        print(pprint.pformat(vocab), file=f)
