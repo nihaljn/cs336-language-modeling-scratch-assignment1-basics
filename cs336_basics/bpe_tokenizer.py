@@ -85,12 +85,11 @@ def train_bpe(
         # 3. clean-up everything related to the pair
         ####
         # find most common pair
-        sorted_pairs = sorted(
+        sorted_pairs = max(
             pair_frequency.items(),
             key=lambda x: (x[1], x[0]), # (count, lexicographical order)
-            reverse=True
         )
-        this_merge: tuple[bytes, bytes] = sorted_pairs[0][0]
+        this_merge: tuple[bytes, bytes] = sorted_pairs[0]
         # merge and form new token
         merges.append(this_merge)
         new_token, new_token_idx = this_merge[0] + this_merge[1], len(vocab)
@@ -121,7 +120,7 @@ def train_bpe(
                     word_set.remove(word)
                     if len(word_set) == 0:
                         del pair_to_words[p]
-                if pair_frequency[p] == 0:
+                if pair_frequency[p] <= 0:
                     del pair_frequency[p]
             for i in range(len(new_word_representation) - 1):
                 (b1, b2) = new_word_representation[i], new_word_representation[i+1]
